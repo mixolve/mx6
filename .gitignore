@@ -11,6 +11,7 @@ CMakeUserPresets.json
 compile_commands.json
 .idea/
 .cache/
+conventions.md
 *.swp
 *.swo
 *~

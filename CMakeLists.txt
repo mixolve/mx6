@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(MX6_SDK_SHIM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/sdk-shims")
 set(MX6_DEPLOY_DIR "/Library/Audio/Plug-Ins/ALL" CACHE PATH "Directory where the built VST3 bundle will be deployed after build")
+set(MX6_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Directory where the built VST3 bundle will be copied after build")
 
 if(APPLE)
     if(DEFINED ENV{CPATH} AND NOT "$ENV{CPATH}" STREQUAL "")
@@ -84,6 +85,14 @@ add_custom_command(TARGET mx6_VST3 POST_BUILD
     COMMAND "${CMAKE_COMMAND}"
         -DPLUGIN_BINARY=$<TARGET_FILE:mx6_VST3>
         -DDEPLOY_DIR=${MX6_DEPLOY_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployVST3.cmake"
+    VERBATIM
+)
+
+add_custom_command(TARGET mx6_VST3 POST_BUILD
+    COMMAND "${CMAKE_COMMAND}"
+        -DPLUGIN_BINARY=$<TARGET_FILE:mx6_VST3>
+        -DDEPLOY_DIR=${MX6_DIST_DIR}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployVST3.cmake"
     VERBATIM
 )
