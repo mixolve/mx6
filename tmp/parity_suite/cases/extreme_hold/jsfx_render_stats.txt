@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/extreme_hold/renders/jsfx.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/extreme_hold/renders/jsfx.wav;LENGTH:0:02.100
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/extreme_hold/renders
-jsfx.wav   Length: 0:02.100   Peak: -150.00
-

@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/ff_stage/renders/jsfx.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/ff_stage/renders/jsfx.wav;LENGTH:0:02.100;PEAK:-95.931702;RMSMMAX:-94.595394;RMSI:-97.213474
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/ff_stage/renders
-jsfx.wav   Length: 0:02.100   Peak: -95.93   RMS-I: -97.2
-

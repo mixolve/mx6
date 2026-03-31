@@ -1,9 +1,0 @@
-sample_rate=44100
-reference_first_nonzero=[11164, 11164]
-candidate_first_nonzero=[11164, 11164]
-lag_samples=0
-lag_ms=0.000000
-direct_ch1_rms=0.000000068416;direct_ch1_db=-143.296809;direct_ch1_peak=0.000000119209;direct_ch1_length=92610
-direct_ch2_rms=0.000000068416;direct_ch2_db=-143.296809;direct_ch2_peak=0.000000119209;direct_ch2_length=92610
-aligned_ch1_rms=0.000000068416;aligned_ch1_db=-143.296809;aligned_ch1_peak=0.000000119209;aligned_ch1_length=92610
-aligned_ch2_rms=0.000000068416;aligned_ch2_db=-143.296809;aligned_ch2_peak=0.000000119209;aligned_ch2_length=92610

@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/parity_default/renders/jsfx_default.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/parity_default/renders/jsfx_default.wav;LENGTH:0:03.000;PEAK:-20.002121;RMSMMAX:-20.000266;RMSI:-20.356161
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/parity_default/renders
-jsfx_default.wav   Length: 0:03.000   Peak: -20.00   RMS-I: -20.4
-

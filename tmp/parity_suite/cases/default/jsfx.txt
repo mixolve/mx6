@@ -1,9 +1,0 @@
-resource_path=/Users/kk/Desktop/YO/reaper-the-first
-project_file=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/default/jsfx.rpp
-input_file=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/input_suite.wav
-render_dir=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/default/renders
-render_pattern=jsfx
-fx_name=JS: V3.jsfx
-render_action=42230
-resolved_fx_name=JS: V3.jsfx
-render_targets_before=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/default/renders/jsfx.wav

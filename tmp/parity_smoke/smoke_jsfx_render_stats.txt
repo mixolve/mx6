@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/parity_smoke/renders/smoke_jsfx.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/parity_smoke/renders/smoke_jsfx.wav;LENGTH:0:01.000;PEAK:-20.002121;RMSMMAX:-20.000269;RMSI:-21.165241
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/parity_smoke/renders
-smoke_jsfx.wav   Length: 0:01.000   Peak: -20.00   RMS-I: -21.2
-

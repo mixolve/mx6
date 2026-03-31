@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/pdc_check/renders/vst3_pdc.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/pdc_check/renders/vst3_pdc.wav;LENGTH:0:03.000;PEAK:-16.987623;RMSMMAX:-16.986868;RMSI:-17.307898
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/pdc_check/renders
-vst3_pdc.wav   Length: 0:03.000   Peak: -16.99   RMS-I: -17.3
-

@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/half_wave/renders/jsfx.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/half_wave/renders/jsfx.wav;LENGTH:0:02.100;PEAK:-5.201040;RMSMMAX:-8.570134;RMSI:-12.967300
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/parity_suite/cases/half_wave/renders
-jsfx.wav   Length: 0:02.100   Peak: -5.20   RMS-I: -13.0
-

@@ -1,5 +1,0 @@
-render_targets_after=/Users/kk/Desktop/YO/code/mx6/tmp/param_sweep/cases/inGn_max/renders/jsfx.wav
-render_stats=FILE:/Users/kk/Desktop/YO/code/mx6/tmp/param_sweep/cases/inGn_max/renders/jsfx.wav;LENGTH:0:02.100;PEAK:+15.480625;CLIP:29052;RMSMMAX:+9.055413;RMSI:+4.492728
-render_summary=Directory: /Users/kk/Desktop/YO/code/mx6/tmp/param_sweep/cases/inGn_max/renders
-jsfx.wav   Length: 0:02.100   Peak: +15.48   RMS-I: +4.5
-
