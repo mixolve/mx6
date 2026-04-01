@@ -6,8 +6,8 @@ if(NOT DEFINED DEPLOY_DIR)
     message(FATAL_ERROR "DEPLOY_DIR is required")
 endif()
 
-get_filename_component(plugin_macos_dir "${PLUGIN_BINARY}" DIRECTORY)
-get_filename_component(plugin_contents_dir "${plugin_macos_dir}" DIRECTORY)
+get_filename_component(plugin_binary_dir "${PLUGIN_BINARY}" DIRECTORY)
+get_filename_component(plugin_contents_dir "${plugin_binary_dir}" DIRECTORY)
 get_filename_component(plugin_bundle_dir "${plugin_contents_dir}" DIRECTORY)
 get_filename_component(plugin_bundle_name "${plugin_bundle_dir}" NAME)
 
