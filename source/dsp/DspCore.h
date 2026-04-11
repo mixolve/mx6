@@ -4,7 +4,7 @@
 
 #include <vector>
 
-namespace mx6::dsp
+namespace mxe::dsp
 {
 class DspCore
 {
@@ -186,4 +186,4 @@ private:
     std::vector<double> dryL;
     std::vector<double> dryR;
 };
-} // namespace mx6::dsp
+} // namespace mxe::dsp

@@ -7,11 +7,11 @@
 #include <array>
 #include <atomic>
 
-class Mx6AudioProcessor final : public juce::AudioProcessor
+class MxeAudioProcessor final : public juce::AudioProcessor
 {
 public:
-    Mx6AudioProcessor();
-    ~Mx6AudioProcessor() override;
+    MxeAudioProcessor();
+    ~MxeAudioProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -42,33 +42,33 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    static constexpr size_t numBands = mx6::dsp::MultibandProcessor::numBands;
+    static constexpr size_t numBands = mxe::dsp::MultibandProcessor::numBands;
     static constexpr size_t numParameterSlots = 35;
     static constexpr size_t numFullbandVisibleSlots = 2;
     static constexpr size_t numFullbandAutomationSlots = 3;
+    static constexpr size_t numCrossoverSlots = mxe::dsp::MultibandProcessor::numSplits;
 
     void cacheParameterPointers();
-    mx6::dsp::DspCore::Parameters readBandParameters(size_t bandIndex) const;
-    mx6::dsp::DspCore::Parameters readSingleParameters() const;
-    mx6::dsp::MultibandProcessor::FullbandParameters readFullbandParameters() const;
-    mx6::dsp::MultibandProcessor::SoloMask readSoloMask() const;
-    bool readSingleBandMode() const;
+    mxe::dsp::DspCore::Parameters readBandParameters(size_t bandIndex) const;
+    mxe::dsp::MultibandProcessor::CrossoverFrequencies readCrossoverFrequencies() const;
+    size_t readActiveSplitCount() const;
+    mxe::dsp::MultibandProcessor::FullbandParameters readFullbandParameters() const;
+    mxe::dsp::MultibandProcessor::SoloMask readSoloMask() const;
     void syncParameters();
 
     juce::AudioProcessorValueTreeState valueTreeState;
-    mx6::dsp::MultibandProcessor multibandProcessor;
-    mx6::dsp::DspCore singleBandProcessor;
-    std::atomic<float>* rawSingleBandModeParameter = nullptr;
+    mxe::dsp::MultibandProcessor multibandProcessor;
+    std::atomic<float>* rawActiveSplitCountParameter = nullptr;
     std::array<std::atomic<float>*, numBands> rawSoloParameters {};
     std::array<std::atomic<float>*, numFullbandVisibleSlots> rawFullbandVisibleParameters {};
     std::array<std::atomic<float>*, numFullbandAutomationSlots> rawFullbandParameters {};
-    std::array<std::atomic<float>*, numParameterSlots> rawSingleParameters {};
+    std::array<std::atomic<float>*, numCrossoverSlots> rawCrossoverParameters {};
     std::array<std::array<std::atomic<float>*, numParameterSlots>, numBands> rawBandParameters {};
-    mx6::dsp::MultibandProcessor::FullbandParameters currentFullbandParameters {};
-    mx6::dsp::DspCore::Parameters currentSingleParameters {};
-    std::array<mx6::dsp::DspCore::Parameters, numBands> currentBandParameters {};
-    mx6::dsp::MultibandProcessor::SoloMask currentSoloMask {};
-    bool currentSingleBandMode = false;
+    mxe::dsp::MultibandProcessor::FullbandParameters currentFullbandParameters {};
+    mxe::dsp::MultibandProcessor::CrossoverFrequencies currentCrossoverFrequencies {};
+    size_t currentActiveSplitCount = mxe::dsp::MultibandProcessor::numSplits;
+    std::array<mxe::dsp::DspCore::Parameters, numBands> currentBandParameters {};
+    mxe::dsp::MultibandProcessor::SoloMask currentSoloMask {};
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Mx6AudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MxeAudioProcessor)
 };

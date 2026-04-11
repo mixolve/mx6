@@ -6,7 +6,7 @@
 
 namespace
 {
-constexpr size_t numBands = mx6::dsp::MultibandProcessor::numBands;
+constexpr size_t numBands = mxe::dsp::MultibandProcessor::numBands;
 
 juce::String formatParameterValue(const float value)
 {
@@ -79,9 +79,20 @@ enum class FullbandVisibleSlot : size_t
     count
 };
 
+enum class CrossoverSlot : size_t
+{
+    xover1,
+    xover2,
+    xover3,
+    xover4,
+    xover5,
+    count
+};
+
 constexpr size_t numParameterSlots = static_cast<size_t>(ParameterSlot::count);
 constexpr size_t numFullbandVisibleSlots = static_cast<size_t>(FullbandVisibleSlot::count);
 constexpr size_t numFullbandAutomationSlots = static_cast<size_t>(FullbandAutomationSlot::count);
+constexpr size_t numCrossoverSlots = static_cast<size_t>(CrossoverSlot::count);
 
 struct ParameterSpec
 {
@@ -144,9 +155,18 @@ constexpr auto fullbandVisibleSpecs = std::to_array<ParameterSpec>({
     { "outGnVisible", "Fullband Out Gain", ParameterType::floating, -24.0f, 24.0f, 0.1f, 0.0f, "dB" },
 });
 
+constexpr auto crossoverSpecs = std::to_array<ParameterSpec>({
+    { "xover1", "Crossover 1", ParameterType::floating, 20.0f, 20000.0f, 1.0f, 134.0f, "Hz" },
+    { "xover2", "Crossover 2", ParameterType::floating, 20.0f, 20000.0f, 1.0f, 523.0f, "Hz" },
+    { "xover3", "Crossover 3", ParameterType::floating, 20.0f, 20000.0f, 1.0f, 2093.0f, "Hz" },
+    { "xover4", "Crossover 4", ParameterType::floating, 20.0f, 20000.0f, 1.0f, 5000.0f, "Hz" },
+    { "xover5", "Crossover 5", ParameterType::floating, 20.0f, 20000.0f, 1.0f, 10000.0f, "Hz" },
+});
+
 static_assert(parameterSpecs.size() == numParameterSlots);
 static_assert(fullbandVisibleSpecs.size() == numFullbandVisibleSlots);
 static_assert(fullbandAutomationSpecs.size() == numFullbandAutomationSlots);
+static_assert(crossoverSpecs.size() == numCrossoverSlots);
 
 constexpr size_t toIndex(const ParameterSlot slot)
 {
@@ -175,11 +195,6 @@ juce::String getAutomationTargetName(const ParameterSlot slot)
     return {};
 }
 
-juce::String makeSingleAutomationParameterName(const ParameterSlot slot)
-{
-    return "ENV SINGLEBAND " + getAutomationTargetName(slot);
-}
-
 juce::String makeBandAutomationParameterName(const size_t bandIndex, const ParameterSlot slot)
 {
     return "ENV BAND " + juce::String(static_cast<int>(bandIndex + 1)) + " " + getAutomationTargetName(slot);
@@ -195,11 +210,6 @@ juce::String makeFullbandParameterId(const char* suffix)
     return "fullband_" + juce::String(suffix);
 }
 
-juce::String makeSingleParameterId(const char* suffix)
-{
-    return "single_" + juce::String(suffix);
-}
-
 juce::String makeBandGroupId(const size_t bandIndex)
 {
     return "band" + juce::String(static_cast<int>(bandIndex + 1));
@@ -208,16 +218,6 @@ juce::String makeBandGroupId(const size_t bandIndex)
 juce::String makeBandGroupName(const size_t bandIndex)
 {
     return "Band " + juce::String(static_cast<int>(bandIndex + 1));
-}
-
-juce::String makeSingleGroupId()
-{
-    return "single";
-}
-
-juce::String makeSingleGroupName()
-{
-    return "Single";
 }
 
 juce::String makeFullbandGroupId()
@@ -235,9 +235,9 @@ juce::String makeSoloParameterId(const size_t bandIndex)
     return "soloBand" + juce::String(static_cast<int>(bandIndex + 1));
 }
 
-juce::String makeSingleBandModeParameterId()
+juce::String makeActiveSplitCountParameterId()
 {
-    return "singleBandMode";
+    return "fullband_activeXovers";
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout buildParameterLayout()
@@ -285,8 +285,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout buildParameterLayout()
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
         soloGroup->addChild(boolParam(makeSoloParameterId(bandIndex), "Solo Band " + juce::String(static_cast<int>(bandIndex + 1)), false, false));
 
-    soloGroup->addChild(boolParam(makeSingleBandModeParameterId(), "Single Band Mode", true, false));
-
     layout.add(std::move(soloGroup));
 
     auto fullbandGroup = std::make_unique<juce::AudioProcessorParameterGroup>(makeFullbandGroupId(),
@@ -299,30 +297,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout buildParameterLayout()
     for (const auto& spec : fullbandAutomationSpecs)
         fullbandGroup->addChild(floatParam(makeFullbandParameterId(spec.suffix), spec.name, spec.min, spec.max, spec.step, spec.defaultValue, spec.label, true));
 
+    for (const auto& spec : crossoverSpecs)
+        fullbandGroup->addChild(floatParam(makeFullbandParameterId(spec.suffix), spec.name, spec.min, spec.max, spec.step, spec.defaultValue, spec.label, false));
+
+    fullbandGroup->addChild(floatParam(makeActiveSplitCountParameterId(), "Active Crossovers", 0.0f, 5.0f, 1.0f, 5.0f, "", false));
+
     layout.add(std::move(fullbandGroup));
-
-    auto singleGroup = std::make_unique<juce::AudioProcessorParameterGroup>(makeSingleGroupId(),
-                                                                            makeSingleGroupName(),
-                                                                            " | ");
-
-    for (size_t parameterIndex = 0; parameterIndex < parameterSpecs.size(); ++parameterIndex)
-    {
-        const auto& spec = parameterSpecs[parameterIndex];
-        const auto slot = static_cast<ParameterSlot>(parameterIndex);
-        const auto parameterId = makeSingleParameterId(spec.suffix);
-        const auto isAutomatable = isAutomationOnlySlot(slot);
-
-        const auto resolvedParameterName = isAutomationOnlySlot(slot)
-            ? makeSingleAutomationParameterName(slot)
-            : juce::String(spec.name);
-
-        if (spec.type == ParameterType::boolean)
-            singleGroup->addChild(boolParam(parameterId, resolvedParameterName, spec.defaultValue >= 0.5f, isAutomatable));
-        else
-            singleGroup->addChild(floatParam(parameterId, resolvedParameterName, spec.min, spec.max, spec.step, spec.defaultValue, spec.label, isAutomatable));
-    }
-
-    layout.add(std::move(singleGroup));
 
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
@@ -352,7 +332,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout buildParameterLayout()
 }
 } // namespace
 
-Mx6AudioProcessor::Mx6AudioProcessor()
+MxeAudioProcessor::MxeAudioProcessor()
     : juce::AudioProcessor(BusesProperties()
                                .withInput("Input", juce::AudioChannelSet::stereo(), true)
                                .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
@@ -361,24 +341,21 @@ Mx6AudioProcessor::Mx6AudioProcessor()
     cacheParameterPointers();
 }
 
-Mx6AudioProcessor::~Mx6AudioProcessor() = default;
+MxeAudioProcessor::~MxeAudioProcessor() = default;
 
-void Mx6AudioProcessor::prepareToPlay(const double sampleRate, const int samplesPerBlock)
+void MxeAudioProcessor::prepareToPlay(const double sampleRate, const int samplesPerBlock)
 {
     multibandProcessor.prepare(sampleRate, samplesPerBlock, getTotalNumOutputChannels());
-    singleBandProcessor.prepare(sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     syncParameters();
     multibandProcessor.reset();
-    singleBandProcessor.reset();
-    setLatencySamples(currentSingleBandMode ? singleBandProcessor.getLatencySamples()
-                                            : multibandProcessor.getLatencySamples());
+    setLatencySamples(multibandProcessor.getLatencySamples());
 }
 
-void Mx6AudioProcessor::releaseResources()
+void MxeAudioProcessor::releaseResources()
 {
 }
 
-bool Mx6AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+bool MxeAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     const auto mainInput = layouts.getMainInputChannelSet();
     const auto mainOutput = layouts.getMainOutputChannelSet();
@@ -390,7 +367,7 @@ bool Mx6AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
         || mainOutput == juce::AudioChannelSet::stereo();
 }
 
-void Mx6AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void MxeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -399,80 +376,77 @@ void Mx6AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 
     syncParameters();
 
-    if (currentSingleBandMode)
-        singleBandProcessor.process(buffer);
-    else
-        multibandProcessor.process(buffer);
+    multibandProcessor.process(buffer);
 }
 
-juce::AudioProcessorEditor* Mx6AudioProcessor::createEditor()
+juce::AudioProcessorEditor* MxeAudioProcessor::createEditor()
 {
-    return new Mx6AudioProcessorEditor(*this);
+    return new MxeAudioProcessorEditor(*this);
 }
 
-bool Mx6AudioProcessor::hasEditor() const
+bool MxeAudioProcessor::hasEditor() const
 {
     return true;
 }
 
-const juce::String Mx6AudioProcessor::getName() const
+const juce::String MxeAudioProcessor::getName() const
 {
     return JucePlugin_Name;
 }
 
-bool Mx6AudioProcessor::acceptsMidi() const
+bool MxeAudioProcessor::acceptsMidi() const
 {
     return false;
 }
 
-bool Mx6AudioProcessor::producesMidi() const
+bool MxeAudioProcessor::producesMidi() const
 {
     return false;
 }
 
-bool Mx6AudioProcessor::isMidiEffect() const
+bool MxeAudioProcessor::isMidiEffect() const
 {
     return false;
 }
 
-double Mx6AudioProcessor::getTailLengthSeconds() const
+double MxeAudioProcessor::getTailLengthSeconds() const
 {
     return 0.0;
 }
 
-int Mx6AudioProcessor::getNumPrograms()
+int MxeAudioProcessor::getNumPrograms()
 {
     return 1;
 }
 
-int Mx6AudioProcessor::getCurrentProgram()
+int MxeAudioProcessor::getCurrentProgram()
 {
     return 0;
 }
 
-void Mx6AudioProcessor::setCurrentProgram(const int index)
+void MxeAudioProcessor::setCurrentProgram(const int index)
 {
     juce::ignoreUnused(index);
 }
 
-const juce::String Mx6AudioProcessor::getProgramName(const int index)
+const juce::String MxeAudioProcessor::getProgramName(const int index)
 {
     juce::ignoreUnused(index);
     return {};
 }
 
-void Mx6AudioProcessor::changeProgramName(const int index, const juce::String& newName)
+void MxeAudioProcessor::changeProgramName(const int index, const juce::String& newName)
 {
     juce::ignoreUnused(index, newName);
 }
 
-void Mx6AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+void MxeAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     if (auto stateXml = valueTreeState.copyState().createXml())
         copyXmlToBinary(*stateXml, destData);
 }
 
-void Mx6AudioProcessor::setStateInformation(const void* data, const int sizeInBytes)
+void MxeAudioProcessor::setStateInformation(const void* data, const int sizeInBytes)
 {
     if (auto xmlState = getXmlFromBinary(data, sizeInBytes))
     {
@@ -481,25 +455,25 @@ void Mx6AudioProcessor::setStateInformation(const void* data, const int sizeInBy
     }
 }
 
-juce::AudioProcessorValueTreeState& Mx6AudioProcessor::getValueTreeState() noexcept
+juce::AudioProcessorValueTreeState& MxeAudioProcessor::getValueTreeState() noexcept
 {
     return valueTreeState;
 }
 
-const juce::AudioProcessorValueTreeState& Mx6AudioProcessor::getValueTreeState() const noexcept
+const juce::AudioProcessorValueTreeState& MxeAudioProcessor::getValueTreeState() const noexcept
 {
     return valueTreeState;
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout Mx6AudioProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout MxeAudioProcessor::createParameterLayout()
 {
     return buildParameterLayout();
 }
 
-void Mx6AudioProcessor::cacheParameterPointers()
+void MxeAudioProcessor::cacheParameterPointers()
 {
-    rawSingleBandModeParameter = valueTreeState.getRawParameterValue(makeSingleBandModeParameterId());
-    jassert(rawSingleBandModeParameter != nullptr);
+    rawActiveSplitCountParameter = valueTreeState.getRawParameterValue(makeActiveSplitCountParameterId());
+    jassert(rawActiveSplitCountParameter != nullptr);
 
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
@@ -519,10 +493,10 @@ void Mx6AudioProcessor::cacheParameterPointers()
         jassert(rawFullbandVisibleParameters[parameterIndex] != nullptr);
     }
 
-    for (size_t parameterIndex = 0; parameterIndex < numParameterSlots; ++parameterIndex)
+    for (size_t parameterIndex = 0; parameterIndex < numCrossoverSlots; ++parameterIndex)
     {
-        rawSingleParameters[parameterIndex] = valueTreeState.getRawParameterValue(makeSingleParameterId(parameterSpecs[parameterIndex].suffix));
-        jassert(rawSingleParameters[parameterIndex] != nullptr);
+        rawCrossoverParameters[parameterIndex] = valueTreeState.getRawParameterValue(makeFullbandParameterId(crossoverSpecs[parameterIndex].suffix));
+        jassert(rawCrossoverParameters[parameterIndex] != nullptr);
     }
 
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
@@ -537,7 +511,7 @@ void Mx6AudioProcessor::cacheParameterPointers()
     }
 }
 
-mx6::dsp::DspCore::Parameters Mx6AudioProcessor::readBandParameters(const size_t bandIndex) const
+mxe::dsp::DspCore::Parameters MxeAudioProcessor::readBandParameters(const size_t bandIndex) const
 {
     const auto loadFloat = [this, bandIndex] (const ParameterSlot slot)
     {
@@ -553,7 +527,7 @@ mx6::dsp::DspCore::Parameters Mx6AudioProcessor::readBandParameters(const size_t
         return loadFloat(slot) >= 0.5f;
     };
 
-    mx6::dsp::DspCore::Parameters parameters;
+    mxe::dsp::DspCore::Parameters parameters;
     parameters.inGn = loadFloat(ParameterSlot::inGn);
     parameters.inRight = loadFloat(ParameterSlot::inRight);
     parameters.inLeft = loadFloat(ParameterSlot::inLeft);
@@ -592,62 +566,7 @@ mx6::dsp::DspCore::Parameters Mx6AudioProcessor::readBandParameters(const size_t
     return parameters;
 }
 
-mx6::dsp::DspCore::Parameters Mx6AudioProcessor::readSingleParameters() const
-{
-    const auto loadFloat = [this] (const ParameterSlot slot)
-    {
-        if (const auto* value = rawSingleParameters[toIndex(slot)])
-            return value->load();
-
-        jassertfalse;
-        return 0.0f;
-    };
-
-    const auto loadBool = [&loadFloat] (const ParameterSlot slot)
-    {
-        return loadFloat(slot) >= 0.5f;
-    };
-
-    mx6::dsp::DspCore::Parameters parameters;
-    parameters.inGn = loadFloat(ParameterSlot::inGn);
-    parameters.inRight = loadFloat(ParameterSlot::inRight);
-    parameters.inLeft = loadFloat(ParameterSlot::inLeft);
-    parameters.autoInGn = loadFloat(ParameterSlot::autoInGn);
-    parameters.autoInRight = loadFloat(ParameterSlot::autoInRight);
-    parameters.autoInLeft = loadFloat(ParameterSlot::autoInLeft);
-    parameters.wide = loadFloat(ParameterSlot::wide);
-    parameters.thLU = loadFloat(ParameterSlot::thLU);
-    parameters.mkLU = loadFloat(ParameterSlot::mkLU);
-    parameters.thLD = loadFloat(ParameterSlot::thLD);
-    parameters.mkLD = loadFloat(ParameterSlot::mkLD);
-    parameters.thRU = loadFloat(ParameterSlot::thRU);
-    parameters.mkRU = loadFloat(ParameterSlot::mkRU);
-    parameters.thRD = loadFloat(ParameterSlot::thRD);
-    parameters.mkRD = loadFloat(ParameterSlot::mkRD);
-    parameters.hwBypass = loadBool(ParameterSlot::hwBypass);
-    parameters.LLThResh = loadFloat(ParameterSlot::LLThResh);
-    parameters.LLTension = loadFloat(ParameterSlot::LLTension);
-    parameters.LLRelease = loadFloat(ParameterSlot::LLRelease);
-    parameters.LLmk = loadFloat(ParameterSlot::LLmk);
-    parameters.RRThResh = loadFloat(ParameterSlot::RRThResh);
-    parameters.RRTension = loadFloat(ParameterSlot::RRTension);
-    parameters.RRRelease = loadFloat(ParameterSlot::RRRelease);
-    parameters.RRmk = loadFloat(ParameterSlot::RRmk);
-    parameters.DMbypass = loadBool(ParameterSlot::DMbypass);
-    parameters.FFThResh = loadFloat(ParameterSlot::FFThResh);
-    parameters.FFTension = loadFloat(ParameterSlot::FFTension);
-    parameters.FFRelease = loadFloat(ParameterSlot::FFRelease);
-    parameters.FFmk = loadFloat(ParameterSlot::FFmk);
-    parameters.FFbypass = loadBool(ParameterSlot::FFbypass);
-    parameters.moRph = loadFloat(ParameterSlot::moRph);
-    parameters.peakHoldHz = loadFloat(ParameterSlot::peakHoldHz);
-    parameters.TensionFlooR = loadFloat(ParameterSlot::TensionFlooR);
-    parameters.TensionHysT = loadFloat(ParameterSlot::TensionHysT);
-    parameters.delTa = loadBool(ParameterSlot::delTa);
-    return parameters;
-}
-
-mx6::dsp::MultibandProcessor::FullbandParameters Mx6AudioProcessor::readFullbandParameters() const
+mxe::dsp::MultibandProcessor::FullbandParameters MxeAudioProcessor::readFullbandParameters() const
 {
     const auto loadAutomationFloat = [this] (const FullbandAutomationSlot slot)
     {
@@ -667,7 +586,7 @@ mx6::dsp::MultibandProcessor::FullbandParameters Mx6AudioProcessor::readFullband
         return 0.0f;
     };
 
-    mx6::dsp::MultibandProcessor::FullbandParameters parameters;
+    mxe::dsp::MultibandProcessor::FullbandParameters parameters;
     parameters.inGn = loadVisibleFloat(FullbandVisibleSlot::inGn);
     parameters.outGn = loadVisibleFloat(FullbandVisibleSlot::outGn);
     parameters.autoInGn = loadAutomationFloat(FullbandAutomationSlot::inGn);
@@ -676,9 +595,33 @@ mx6::dsp::MultibandProcessor::FullbandParameters Mx6AudioProcessor::readFullband
     return parameters;
 }
 
-mx6::dsp::MultibandProcessor::SoloMask Mx6AudioProcessor::readSoloMask() const
+mxe::dsp::MultibandProcessor::CrossoverFrequencies MxeAudioProcessor::readCrossoverFrequencies() const
 {
-    mx6::dsp::MultibandProcessor::SoloMask soloMask {};
+    mxe::dsp::MultibandProcessor::CrossoverFrequencies frequencies {};
+
+    for (size_t parameterIndex = 0; parameterIndex < frequencies.size(); ++parameterIndex)
+    {
+        if (const auto* value = rawCrossoverParameters[parameterIndex])
+            frequencies[parameterIndex] = static_cast<double>(value->load());
+        else
+            jassertfalse;
+    }
+
+    return frequencies;
+}
+
+size_t MxeAudioProcessor::readActiveSplitCount() const
+{
+    if (const auto* value = rawActiveSplitCountParameter)
+        return static_cast<size_t>(juce::jlimit(0, static_cast<int>(numCrossoverSlots), static_cast<int>(std::round(value->load()))));
+
+    jassertfalse;
+    return numCrossoverSlots;
+}
+
+mxe::dsp::MultibandProcessor::SoloMask MxeAudioProcessor::readSoloMask() const
+{
+    mxe::dsp::MultibandProcessor::SoloMask soloMask {};
 
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
@@ -691,34 +634,25 @@ mx6::dsp::MultibandProcessor::SoloMask Mx6AudioProcessor::readSoloMask() const
     return soloMask;
 }
 
-bool Mx6AudioProcessor::readSingleBandMode() const
-{
-    if (const auto* value = rawSingleBandModeParameter)
-        return value->load() >= 0.5f;
-
-    jassertfalse;
-    return false;
-}
-
-void Mx6AudioProcessor::syncParameters()
+void MxeAudioProcessor::syncParameters()
 {
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
         currentBandParameters[bandIndex] = readBandParameters(bandIndex);
 
     currentFullbandParameters = readFullbandParameters();
-    currentSingleParameters = readSingleParameters();
+    currentCrossoverFrequencies = readCrossoverFrequencies();
+    currentActiveSplitCount = readActiveSplitCount();
     currentSoloMask = readSoloMask();
-    currentSingleBandMode = readSingleBandMode();
     multibandProcessor.setBandParameters(currentBandParameters);
+    multibandProcessor.setActiveSplitCount(currentActiveSplitCount);
+    multibandProcessor.setCrossoverFrequencies(currentCrossoverFrequencies);
     multibandProcessor.setFullbandParameters(currentFullbandParameters);
     multibandProcessor.setSoloMask(currentSoloMask);
 
-    singleBandProcessor.setParameters(currentSingleParameters);
-    setLatencySamples(currentSingleBandMode ? singleBandProcessor.getLatencySamples()
-                                            : multibandProcessor.getLatencySamples());
+    setLatencySamples(multibandProcessor.getLatencySamples());
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new Mx6AudioProcessor();
+    return new MxeAudioProcessor();
 }

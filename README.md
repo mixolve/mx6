@@ -1,8 +1,8 @@
-# mx6
+# mxe
 
-[latest version (currently macOS only)](https://github.com/mixolve/mx6/releases/latest/download/mx6-macos.zip)
+[latest version (currently macOS only)](https://github.com/mixolve/mxe/releases/latest/download/mxe-macos.zip)
 
-mx6 is a six-band dynamics processor built for fast band-by-band control, single-band focus, and compact direct-access workflow.
+mxe is a six-band dynamics processor built for fast band-by-band control, single-band focus, and compact direct-access workflow.
 
 key features:
 - six-band crossover with per-band monitoring and fast band switching

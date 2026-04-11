@@ -18,7 +18,7 @@ constexpr int footerHeight = 20;
 constexpr int pageColumnWidth = fixedEditorWidth - (editorInsetX * 2);
 constexpr int sectionWidth = pageColumnWidth;
 constexpr int sectionContentInsetX = 4;
-constexpr int sectionContentInsetY = 6;
+constexpr int sectionRowGap = 6;
 constexpr int controlRowWidth = sectionWidth - (sectionContentInsetX * 2);
 constexpr int parameterValueWidth = 94;
 constexpr int parameterNameWidth = controlRowWidth - parameterGap - parameterValueWidth;
@@ -28,6 +28,9 @@ constexpr float uiFontSize = 20.0f;
 constexpr float valueBoxDragNormalisedPerPixel = 0.0050f;
 constexpr float smoothWheelStepThreshold = 0.030f;
 constexpr float wheelStepMultiplier = 2.0f;
+constexpr float crossoverDragNormalisedPerPixel = 0.0005f;
+constexpr float crossoverWheelStepMultiplier = 20.0f;
+constexpr float crossoverMinGapHz = 1.0f;
 
 const auto uiWhite = juce::Colour(0xffffffff);
 const auto uiBlack = juce::Colour(0xff000000);
@@ -37,6 +40,8 @@ const auto uiGrey900 = juce::Colour(0xff1a1a1a);
 const auto uiGrey800 = juce::Colour(0xff242424);
 const auto uiGrey700 = juce::Colour(0xff363636);
 const auto uiGrey500 = juce::Colour(0xff707070);
+
+using ValueConstraint = std::function<float(float)>;
 
 juce::FontOptions makeUiFont(const int styleFlags = juce::Font::plain, const float height = uiFontSize)
 {
@@ -71,6 +76,9 @@ struct ControlSpec
     const char* label = "";
     bool isToggle = false;
     bool tracksChangedState = true;
+    bool valueInputOnly = false;
+    float dragNormalisedPerPixel = valueBoxDragNormalisedPerPixel;
+    float wheelMultiplier = wheelStepMultiplier;
 };
 
 struct SectionSpec
@@ -130,20 +138,24 @@ constexpr auto fullbandControls = std::to_array<ControlSpec>({
     { "outGnVisible", "OUT-GAIN" },
 });
 
+constexpr auto crossoverControls = std::to_array<ControlSpec>({
+    { "xover1", "XOVER-1", false, true, false, crossoverDragNormalisedPerPixel, crossoverWheelStepMultiplier },
+    { "xover2", "XOVER-2", false, true, false, crossoverDragNormalisedPerPixel, crossoverWheelStepMultiplier },
+    { "xover3", "XOVER-3", false, true, false, crossoverDragNormalisedPerPixel, crossoverWheelStepMultiplier },
+    { "xover4", "XOVER-4", false, true, false, crossoverDragNormalisedPerPixel, crossoverWheelStepMultiplier },
+    { "xover5", "XOVER-5", false, true, false, crossoverDragNormalisedPerPixel, crossoverWheelStepMultiplier },
+});
+
 const auto halfWaveSection = SectionSpec { "HALF-WAVE", halfWaveControls, false, false };
 const auto dmSection = SectionSpec { "DUAL-MONO", dmControls, false, false };
 const auto ffSection = SectionSpec { "STEREO", ffControls, false, false };
 const auto globalSection = SectionSpec { "GLOBAL", globalControls, true, false };
 const auto fullbandSection = SectionSpec { "FULLBAND", fullbandControls, true, false };
+const auto crossoverSection = SectionSpec { "CROSSOVER", crossoverControls, false, false };
 
 juce::String makeBandParameterId(const size_t bandIndex, const char* suffix)
 {
     return "band" + juce::String(static_cast<int>(bandIndex + 1)) + "_" + suffix;
-}
-
-juce::String makeSingleParameterId(const char* suffix)
-{
-    return "single_" + juce::String(suffix);
 }
 
 juce::String makeFullbandParameterId(const char* suffix)
@@ -156,9 +168,9 @@ juce::String makeSoloParameterId(const size_t bandIndex)
     return "soloBand" + juce::String(static_cast<int>(bandIndex + 1));
 }
 
-juce::String makeSingleBandModeParameterId()
+juce::String makeActiveSplitCountParameterId()
 {
-    return "singleBandMode";
+    return "fullband_activeXovers";
 }
 
 juce::String makeBandName(const size_t bandIndex)
@@ -295,11 +307,21 @@ public:
 class ValueBoxComponent final : public juce::Component
 {
 public:
-    ValueBoxComponent(ResettableValueSlider& sliderToControl, juce::RangedAudioParameter* parameterToControl)
+    ValueBoxComponent(ResettableValueSlider& sliderToControl,
+                      juce::RangedAudioParameter* parameterToControl,
+                      ValueConstraint valueConstraintIn,
+                      const bool allowGestureEditingIn,
+                      const float dragNormalisedPerPixelIn,
+                      const float wheelStepMultiplierIn)
         : slider(sliderToControl),
-          parameter(parameterToControl)
+          parameter(parameterToControl),
+          valueConstraint(std::move(valueConstraintIn)),
+          allowGestureEditing(allowGestureEditingIn),
+          dragNormalisedPerPixel(dragNormalisedPerPixelIn),
+          wheelMultiplier(wheelStepMultiplierIn)
     {
-        setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+        setMouseCursor(allowGestureEditing ? juce::MouseCursor::UpDownResizeCursor
+                                           : juce::MouseCursor::IBeamCursor);
     }
 
     ~ValueBoxComponent() override
@@ -360,6 +382,9 @@ public:
     {
         juce::ignoreUnused(event);
 
+        if (! allowGestureEditing)
+            return;
+
         if (parameter == nullptr)
             return;
 
@@ -406,8 +431,9 @@ public:
             return;
 
         const auto currentValue = parameter->convertFrom0to1(parameter->getValue());
-        const auto unclampedValue = currentValue + (interval * wheelStepMultiplier * static_cast<float>(stepCount));
-        const auto legalValue = range.snapToLegalValue(juce::jlimit(range.start, range.end, unclampedValue));
+        const auto unclampedValue = currentValue + (interval * wheelMultiplier * static_cast<float>(stepCount));
+        const auto constrainedValue = constrainValue(unclampedValue);
+        const auto legalValue = range.snapToLegalValue(juce::jlimit(range.start, range.end, constrainedValue));
 
         parameter->beginChangeGesture();
         parameter->setValueNotifyingHost(parameter->convertTo0to1(legalValue));
@@ -433,7 +459,7 @@ public:
         if (event.mods.isPopupMenu())
             return;
 
-        if (event.mods.isShiftDown())
+        if (event.mods.isShiftDown() && allowGestureEditing)
         {
             if (onResetRequest)
                 onResetRequest();
@@ -441,7 +467,7 @@ public:
             return;
         }
 
-        if (! event.mods.isLeftButtonDown() || parameter == nullptr)
+        if (! allowGestureEditing || ! event.mods.isLeftButtonDown() || parameter == nullptr)
             return;
 
         dragStartNormalisedValue = parameter->getValue();
@@ -461,9 +487,10 @@ public:
         const auto deltaPixels = -event.getDistanceFromDragStartY();
         const auto newNormalisedValue = juce::jlimit(0.0f,
                                                      1.0f,
-                                                     dragStartNormalisedValue + (static_cast<float>(deltaPixels) * valueBoxDragNormalisedPerPixel));
+                                                     dragStartNormalisedValue + (static_cast<float>(deltaPixels) * dragNormalisedPerPixel));
+        const auto newValue = constrainValue(parameter->convertFrom0to1(newNormalisedValue));
 
-        parameter->setValueNotifyingHost(newNormalisedValue);
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(newValue));
     }
 
     void mouseUp(const juce::MouseEvent& event) override
@@ -518,7 +545,7 @@ private:
             const auto clampedValue = juce::jlimit(static_cast<double>(range.start),
                                                    static_cast<double>(range.end),
                                                    enteredValue);
-            const auto legalValue = range.snapToLegalValue(static_cast<float>(clampedValue));
+            const auto legalValue = range.snapToLegalValue(constrainValue(static_cast<float>(clampedValue)));
 
             parameter->beginChangeGesture();
             parameter->setValueNotifyingHost(parameter->convertTo0to1(legalValue));
@@ -549,8 +576,20 @@ private:
         isTrackingGlobalClicks = false;
     }
 
+    float constrainValue(const float value) const
+    {
+        if (valueConstraint)
+            return valueConstraint(value);
+
+        return value;
+    }
+
     ResettableValueSlider& slider;
     juce::RangedAudioParameter* parameter = nullptr;
+    ValueConstraint valueConstraint;
+    bool allowGestureEditing = true;
+    float dragNormalisedPerPixel = valueBoxDragNormalisedPerPixel;
+    float wheelMultiplier = wheelStepMultiplier;
     juce::Colour outlineColour = uiGrey500;
     juce::Colour highlightColour = uiAccent;
     bool isDragging = false;
@@ -560,7 +599,7 @@ private:
     std::unique_ptr<WheelForwardingTextEditor> editor;
 };
 
-class Mx6LookAndFeel final : public juce::LookAndFeel_V4
+class MxeLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     juce::Font getLabelFont(juce::Label&) override
@@ -617,9 +656,9 @@ public:
     }
 };
 
-Mx6LookAndFeel& getMx6LookAndFeel()
+MxeLookAndFeel& getMxeLookAndFeel()
 {
-    static Mx6LookAndFeel lookAndFeel;
+    static MxeLookAndFeel lookAndFeel;
     return lookAndFeel;
 }
 
@@ -632,6 +671,7 @@ public:
     }
 
     void setChangedState(const bool shouldBeChanged) { juce::ignoreUnused(shouldBeChanged); }
+    void setTextJustification(const juce::Justification justification) { textJustification = justification; }
 
     void paintButton(juce::Graphics& graphics, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override
     {
@@ -649,11 +689,15 @@ public:
 
         graphics.setColour(textColour);
         graphics.setFont(makeUiFont());
-        graphics.drawFittedText(getButtonText(), getLocalBounds().reduced(3), juce::Justification::centred, 1, 1.0f);
+        const auto textBounds = textJustification.testFlags(juce::Justification::left)
+            ? getLocalBounds().withTrimmedLeft(6).reduced(0, 3)
+            : getLocalBounds().reduced(3);
+        graphics.drawFittedText(getButtonText(), textBounds, textJustification, 1, 1.0f);
     }
 
 private:
     juce::Colour accentColour;
+    juce::Justification textJustification = juce::Justification::centred;
 };
 
 class ParameterControl final : public juce::Component
@@ -663,13 +707,23 @@ public:
                      const juce::String& parameterId,
                      const ControlSpec& spec,
                      const juce::Colour accent,
-                     std::function<void()> onChangedStateChangeIn)
+                     std::function<void()> onChangedStateChangeIn,
+                     ValueConstraint valueConstraintIn = {},
+                     std::function<void()> onSoloClickIn = {},
+                     std::function<bool()> isSoloActiveIn = {},
+                     std::function<bool()> isSoloEnabledIn = {})
         : isToggle(spec.isToggle),
+          hasSoloButton(spec.isToggle && juce::String(spec.suffix) == "delTa" && onSoloClickIn != nullptr),
           tracksChangedState(spec.tracksChangedState),
           accentColour(accent),
           parameter(dynamic_cast<juce::RangedAudioParameter*>(state.getParameter(parameterId))),
           onChangedStateChange(std::move(onChangedStateChangeIn)),
-          toggle(accent)
+          valueConstraint(std::move(valueConstraintIn)),
+          onSoloClick(std::move(onSoloClickIn)),
+          isSoloActive(std::move(isSoloActiveIn)),
+          isSoloEnabled(std::move(isSoloEnabledIn)),
+          toggle(accent),
+          soloButton(accent)
     {
         jassert(parameter != nullptr);
 
@@ -687,6 +741,21 @@ public:
                 toggle);
 
             addAndMakeVisible(toggle);
+
+            if (hasSoloButton)
+            {
+                soloButton.setButtonText("SOLO");
+                soloButton.setClickingTogglesState(false);
+                soloButton.onClick = [this]
+                {
+                    if (onSoloClick)
+                        onSoloClick();
+
+                    refreshExternalState();
+                };
+                addAndMakeVisible(soloButton);
+                refreshExternalState();
+            }
         }
         else
         {
@@ -701,7 +770,7 @@ public:
 
             slider.setSliderStyle(juce::Slider::LinearHorizontal);
             slider.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
-            slider.setLookAndFeel(&getMx6LookAndFeel());
+            slider.setLookAndFeel(&getMxeLookAndFeel());
             slider.setInterceptsMouseClicks(false, false);
             slider.setAlpha(0.0f);
             slider.onResetRequest = [this]
@@ -735,7 +804,12 @@ public:
                 parameterId,
                 slider);
 
-            valueBox = std::make_unique<ValueBoxComponent>(slider, parameter);
+            valueBox = std::make_unique<ValueBoxComponent>(slider,
+                                                           parameter,
+                                                           valueConstraint,
+                                                           ! spec.valueInputOnly,
+                                                           spec.dragNormalisedPerPixel,
+                                                           spec.wheelMultiplier);
             valueBox->onResetRequest = [this]
             {
                 resetParameterToDefault();
@@ -762,6 +836,23 @@ public:
         return changedState;
     }
 
+    void setControlEnabled(const bool shouldBeEnabled)
+    {
+        setEnabled(shouldBeEnabled);
+        setAlpha(shouldBeEnabled ? 1.0f : 0.45f);
+    }
+
+    void refreshExternalState()
+    {
+        if (! hasSoloButton)
+            return;
+
+        const auto enabled = isSoloEnabled == nullptr || isSoloEnabled();
+        soloButton.setEnabled(enabled);
+        soloButton.setAlpha(enabled ? 1.0f : 0.45f);
+        soloButton.setToggleState(enabled && isSoloActive != nullptr && isSoloActive(), juce::dontSendNotification);
+    }
+
     ~ParameterControl() override
     {
         if (! isToggle)
@@ -774,6 +865,16 @@ public:
 
         if (isToggle)
         {
+            if (hasSoloButton)
+            {
+                auto row = bounds;
+                toggle.setBounds(row.removeFromLeft(parameterNameWidth));
+                row.removeFromLeft(parameterGap);
+                soloButton.setBounds(row);
+                refreshExternalState();
+                return;
+            }
+
             toggle.setBounds(bounds);
             return;
         }
@@ -813,7 +914,12 @@ private:
             return;
 
         parameter->beginChangeGesture();
-        parameter->setValueNotifyingHost(parameter->getDefaultValue());
+        auto defaultValue = parameter->convertFrom0to1(parameter->getDefaultValue());
+
+        if (valueConstraint)
+            defaultValue = valueConstraint(defaultValue);
+
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(defaultValue));
         parameter->endChangeGesture();
     }
 
@@ -847,13 +953,19 @@ private:
     }
 
     const bool isToggle = false;
+    const bool hasSoloButton = false;
     const bool tracksChangedState = true;
     const juce::Colour accentColour;
     juce::RangedAudioParameter* parameter = nullptr;
     std::function<void()> onChangedStateChange;
+    ValueConstraint valueConstraint;
+    std::function<void()> onSoloClick;
+    std::function<bool()> isSoloActive;
+    std::function<bool()> isSoloEnabled;
     bool callbacksEnabled = false;
     bool changedState = false;
     BoxTextButton toggle;
+    BoxTextButton soloButton;
     ResettableParameterLabel title;
     ResettableValueSlider slider;
     std::unique_ptr<ValueBoxComponent> valueBox;
@@ -864,17 +976,30 @@ private:
 class SectionComponent final : public juce::Component
 {
 public:
+    struct ExtraControlPlacement
+    {
+        size_t afterVisibleControlCount = 0;
+    };
+
     SectionComponent(juce::AudioProcessorValueTreeState& state,
                      const std::function<juce::String(const char*)>& parameterIdProvider,
                      const SectionSpec& spec,
                      const juce::Colour accent,
                      std::function<void()> onLayoutChangeIn,
                      std::function<void()> onChangedStateChangeIn,
-                     std::function<void(bool)> onExpandedChangedIn)
+                     std::function<void(bool)> onExpandedChangedIn,
+                     std::function<ValueConstraint(const char*)> valueConstraintProvider = {},
+                     std::function<void(const char*)> soloClickProvider = {},
+                     std::function<bool(const char*)> soloActiveProvider = {},
+                     std::function<bool(const char*)> soloEnabledProvider = {},
+                     std::function<size_t()> extraRowsBeforeControlsProviderIn = {},
+                     std::function<size_t()> enabledControlCountProviderIn = {})
         : accentColour(accent),
           onLayoutChange(std::move(onLayoutChangeIn)),
           onChangedStateChange(std::move(onChangedStateChangeIn)),
           onExpandedChanged(std::move(onExpandedChangedIn)),
+          extraRowsBeforeControlsProvider(std::move(extraRowsBeforeControlsProviderIn)),
+          enabledControlCountProvider(std::move(enabledControlCountProviderIn)),
           staysExpandedOnSelfClick(spec.staysExpandedOnSelfClick),
           headerButton(accent)
     {
@@ -907,7 +1032,11 @@ public:
                                                               [this]
                                                               {
                                                                   refreshChangedAppearance();
-                                                              });
+                                                              },
+                                                              valueConstraintProvider ? valueConstraintProvider(controlSpec.suffix) : ValueConstraint {},
+                                                              soloClickProvider ? std::function<void()> { [soloClickProvider, suffix = controlSpec.suffix] { soloClickProvider(suffix); } } : std::function<void()> {},
+                                                              soloActiveProvider ? std::function<bool()> { [soloActiveProvider, suffix = controlSpec.suffix] { return soloActiveProvider(suffix); } } : std::function<bool()> {},
+                                                              soloEnabledProvider ? std::function<bool()> { [soloEnabledProvider, suffix = controlSpec.suffix] { return soloEnabledProvider(suffix); } } : std::function<bool()> {});
             addAndMakeVisible(*control);
             controls.push_back(std::move(control));
         }
@@ -919,15 +1048,32 @@ public:
 
     int getPreferredHeight() const
     {
-        auto height = 22 + 8;
+        auto height = 22;
 
         if (headerButton.getToggleState())
         {
+            auto hasRows = false;
+
+            for (size_t rowIndex = 0; rowIndex < getExtraRowsBeforeControls(); ++rowIndex)
+            {
+                if (hasRows)
+                    height += sectionRowGap;
+
+                height += 24;
+                hasRows = true;
+            }
+
             for (const auto& control : controls)
-                height += control->getPreferredHeight() + 6;
+            {
+                if (hasRows)
+                    height += sectionRowGap;
+
+                height += control->getPreferredHeight();
+                hasRows = true;
+            }
         }
 
-        return height + 6;
+        return height;
     }
 
     bool isChangedFromDefault() const noexcept
@@ -938,6 +1084,71 @@ public:
     bool isExpanded() const noexcept
     {
         return headerButton.getToggleState();
+    }
+
+    void refreshExternalState()
+    {
+        updateExpandedState();
+
+        for (auto& control : controls)
+            control->refreshExternalState();
+    }
+
+    juce::Rectangle<int> getExtraControlBounds(const size_t extraControlIndex) const
+    {
+        return getExtraControlBounds(extraControlIndex, {});
+    }
+
+    juce::Rectangle<int> getExtraControlBounds(const size_t extraControlIndex, const ExtraControlPlacement placement) const
+    {
+        if (! headerButton.getToggleState())
+            return {};
+
+        const auto existingControlsBeforeExtra = juce::jmin(controls.size(), placement.afterVisibleControlCount);
+
+        auto bounds = getLocalBounds().withTrimmedLeft(sectionContentInsetX).withTrimmedRight(sectionContentInsetX);
+        bounds.removeFromTop(22);
+
+        if (placement.afterVisibleControlCount == 0)
+        {
+            for (size_t index = 0; index < extraControlIndex; ++index)
+            {
+                bounds.removeFromTop(24);
+
+                if (index + 1 < extraControlIndex)
+                    bounds.removeFromTop(sectionRowGap);
+            }
+
+            return bounds.removeFromTop(24);
+        }
+
+        for (size_t rowIndex = 0; rowIndex < getExtraRowsBeforeControls(); ++rowIndex)
+        {
+            bounds.removeFromTop(24);
+
+            if (rowIndex + 1 < getExtraRowsBeforeControls() || existingControlsBeforeExtra > 0 || extraControlIndex > 0)
+                bounds.removeFromTop(sectionRowGap);
+        }
+
+        const auto controlsBeforeExtra = existingControlsBeforeExtra;
+
+        for (size_t controlIndex = 0; controlIndex < controlsBeforeExtra; ++controlIndex)
+        {
+            bounds.removeFromTop(controls[controlIndex]->getPreferredHeight());
+
+            if (controlIndex + 1 < controlsBeforeExtra || extraControlIndex > 0)
+                bounds.removeFromTop(sectionRowGap);
+        }
+
+        for (size_t index = 0; index < extraControlIndex; ++index)
+        {
+            bounds.removeFromTop(24);
+
+            if (index + 1 < extraControlIndex)
+                bounds.removeFromTop(sectionRowGap);
+        }
+
+        return bounds.removeFromTop(24);
     }
 
     void setExpanded(const bool shouldBeExpanded)
@@ -951,27 +1162,38 @@ public:
 
     void paint(juce::Graphics& graphics) override
     {
-        graphics.setColour(uiGrey800);
-        graphics.fillRect(getLocalBounds());
-
-        graphics.setColour(uiGrey700);
-        graphics.drawRect(getLocalBounds(), 1);
+        juce::ignoreUnused(graphics);
     }
 
     void resized() override
     {
-        auto bounds = getLocalBounds().reduced(sectionContentInsetX, sectionContentInsetY);
+        auto bounds = getLocalBounds().withTrimmedLeft(sectionContentInsetX).withTrimmedRight(sectionContentInsetX);
         headerButton.setBounds(bounds.removeFromTop(22));
-        bounds.removeFromTop(6);
 
         if (! headerButton.getToggleState())
             return;
 
-        for (auto& control : controls)
+        auto hasRows = false;
+
+        for (size_t rowIndex = 0; rowIndex < getExtraRowsBeforeControls(); ++rowIndex)
         {
+            if (hasRows)
+                bounds.removeFromTop(sectionRowGap);
+
+            bounds.removeFromTop(24);
+            hasRows = true;
+        }
+
+        for (size_t controlIndex = 0; controlIndex < controls.size(); ++controlIndex)
+        {
+            auto& control = controls[controlIndex];
             const auto height = control->getPreferredHeight();
+
+            if (hasRows)
+                bounds.removeFromTop(sectionRowGap);
+
             control->setBounds(bounds.removeFromTop(height));
-            bounds.removeFromTop(6);
+            hasRows = true;
         }
     }
 
@@ -1002,15 +1224,34 @@ private:
     void updateExpandedState()
     {
         const auto expanded = headerButton.getToggleState();
+        const auto enabledControlCount = getEnabledControlCount();
 
-        for (auto& control : controls)
-            control->setVisible(expanded);
+        for (size_t controlIndex = 0; controlIndex < controls.size(); ++controlIndex)
+        {
+            controls[controlIndex]->setVisible(expanded);
+            controls[controlIndex]->setControlEnabled(controlIndex < enabledControlCount);
+        }
+    }
+
+    size_t getExtraRowsBeforeControls() const
+    {
+        return extraRowsBeforeControlsProvider != nullptr ? extraRowsBeforeControlsProvider() : 0;
+    }
+
+    size_t getEnabledControlCount() const
+    {
+        if (enabledControlCountProvider)
+            return enabledControlCountProvider();
+
+        return controls.size();
     }
 
     const juce::Colour accentColour;
     std::function<void()> onLayoutChange;
     std::function<void()> onChangedStateChange;
     std::function<void(bool)> onExpandedChanged;
+    std::function<size_t()> extraRowsBeforeControlsProvider;
+    std::function<size_t()> enabledControlCountProvider;
     const bool staysExpandedOnSelfClick = false;
     bool callbacksEnabled = false;
     bool changedState = false;
@@ -1024,8 +1265,14 @@ public:
     BandPageComponent(juce::AudioProcessorValueTreeState& state,
                       const std::function<juce::String(const char*)>& parameterIdProvider,
                       const juce::Colour accent,
-                      std::function<void()> onChangedStateChangeIn)
+                      std::function<void()> onChangedStateChangeIn,
+                      std::function<void()> onSoloClickIn = {},
+                      std::function<bool()> isSoloActiveIn = {},
+                      std::function<bool()> isSoloEnabledIn = {})
         : onChangedStateChange(std::move(onChangedStateChangeIn)),
+          onSoloClick(std::move(onSoloClickIn)),
+          isSoloActive(std::move(isSoloActiveIn)),
+          isSoloEnabled(std::move(isSoloEnabledIn)),
           halfWave(state,
                    parameterIdProvider,
                    halfWaveSection,
@@ -1053,7 +1300,21 @@ public:
                  accent,
                  [this] { resized(); },
                  [this] { refreshChangedAppearance(); },
-                 [this] (bool expanded) { handleSectionExpanded(3, expanded); })
+                 [this] (bool expanded) { handleSectionExpanded(3, expanded); },
+                 {},
+                 [this] (const char* suffix)
+                 {
+                     if (juce::String(suffix) == "delTa" && onSoloClick)
+                         onSoloClick();
+                 },
+                 [this] (const char* suffix)
+                 {
+                     return juce::String(suffix) == "delTa" && isSoloActive != nullptr && isSoloActive();
+                 },
+                 [this] (const char* suffix)
+                 {
+                     return juce::String(suffix) == "delTa" && (isSoloEnabled == nullptr || isSoloEnabled());
+                 })
     {
         addAndMakeVisible(halfWave);
         addAndMakeVisible(dm);
@@ -1068,15 +1329,20 @@ public:
         return changedState;
     }
 
+    void refreshExternalState()
+    {
+        global.refreshExternalState();
+    }
+
     int getPreferredHeight() const
     {
         return 8
             + halfWave.getPreferredHeight()
-            + 6
+            + sectionRowGap
             + dm.getPreferredHeight()
-            + 6
+            + sectionRowGap
             + ff.getPreferredHeight()
-            + 6
+            + sectionRowGap
             + global.getPreferredHeight();
     }
 
@@ -1091,13 +1357,13 @@ public:
 
         auto sectionBounds = bounds.removeFromTop(halfWave.getPreferredHeight());
         halfWave.setBounds(sectionBounds);
-        bounds.removeFromTop(6);
+        bounds.removeFromTop(sectionRowGap);
         sectionBounds = bounds.removeFromTop(dm.getPreferredHeight());
         dm.setBounds(sectionBounds);
-        bounds.removeFromTop(6);
+        bounds.removeFromTop(sectionRowGap);
         sectionBounds = bounds.removeFromTop(ff.getPreferredHeight());
         ff.setBounds(sectionBounds);
-        bounds.removeFromTop(6);
+        bounds.removeFromTop(sectionRowGap);
         sectionBounds = bounds.removeFromTop(global.getPreferredHeight());
         global.setBounds(sectionBounds);
     }
@@ -1141,6 +1407,9 @@ private:
     }
 
     std::function<void()> onChangedStateChange;
+    std::function<void()> onSoloClick;
+    std::function<bool()> isSoloActive;
+    std::function<bool()> isSoloEnabled;
     bool callbacksEnabled = false;
     bool changedState = false;
     SectionComponent halfWave;
@@ -1153,21 +1422,139 @@ class FullbandPageComponent final : public juce::Component
 {
 public:
     FullbandPageComponent(juce::AudioProcessorValueTreeState& state,
-                          const std::function<juce::String(const char*)>& parameterIdProvider)
-        : fullband(state,
+                          const std::function<juce::String(const char*)>& parameterIdProvider,
+                          const bool autoSoloEnabled,
+                          std::function<size_t()> activeSplitCountProviderIn,
+                          std::function<void(int)> onActiveSplitCountChangeIn,
+                          std::function<void(bool)> onAutoSoloChangedIn)
+        : activeSplitCountProvider(std::move(activeSplitCountProviderIn)),
+          fullband(state,
                    parameterIdProvider,
                    fullbandSection,
                    uiAccent,
                    [this] { resized(); },
                    [] {},
-                   [] (bool) {})
+                   [this] (const bool expanded)
+                   {
+                       if (expanded)
+                           crossover.setExpanded(false);
+                   }),
+          crossover(state,
+                    parameterIdProvider,
+                    crossoverSection,
+                    uiAccent,
+                    [this] { resized(); },
+                    [] {},
+                    [this] (const bool expanded)
+                    {
+                        if (expanded)
+                            fullband.setExpanded(false);
+                    },
+                    [&state, parameterIdProvider] (const char* suffix)
+                    {
+                        const auto suffixString = juce::String(suffix);
+                        auto parameterIndex = static_cast<size_t>(0);
+                        auto found = false;
+
+                        for (size_t index = 0; index < crossoverControls.size(); ++index)
+                        {
+                            if (suffixString == crossoverControls[index].suffix)
+                            {
+                                parameterIndex = index;
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (! found)
+                            return ValueConstraint {};
+
+                        return ValueConstraint { [&state, parameterIdProvider, parameterIndex] (const float value)
+                        {
+                            auto lowerBound = 20.0f;
+                            auto upperBound = 20000.0f;
+
+                            if (parameterIndex > 0)
+                            {
+                                if (auto* previousParameter = dynamic_cast<juce::RangedAudioParameter*>(
+                                        state.getParameter(parameterIdProvider(crossoverControls[parameterIndex - 1].suffix))))
+                                {
+                                    lowerBound = previousParameter->convertFrom0to1(previousParameter->getValue()) + crossoverMinGapHz;
+                                }
+                            }
+
+                            if (parameterIndex + 1 < crossoverControls.size())
+                            {
+                                if (auto* nextParameter = dynamic_cast<juce::RangedAudioParameter*>(
+                                        state.getParameter(parameterIdProvider(crossoverControls[parameterIndex + 1].suffix))))
+                                {
+                                    upperBound = nextParameter->convertFrom0to1(nextParameter->getValue()) - crossoverMinGapHz;
+                                }
+                            }
+
+                            return juce::jlimit(lowerBound, juce::jmax(lowerBound, upperBound), value);
+                        } };
+                    },
+                    {},
+                    {},
+                    {},
+                    []
+                    {
+                        return static_cast<size_t>(1);
+                    },
+                    [this]
+                    {
+                        return activeSplitCountProvider != nullptr
+                            ? juce::jmin(crossoverControls.size(), activeSplitCountProvider())
+                            : crossoverControls.size();
+                    }),
+          autoSoloButton(uiAccent),
+          addCrossoverButton(uiAccent),
+          removeCrossoverButton(uiAccent),
+          onActiveSplitCountChange(std::move(onActiveSplitCountChangeIn)),
+          onAutoSoloChanged(std::move(onAutoSoloChangedIn))
     {
         addAndMakeVisible(fullband);
+        addAndMakeVisible(crossover);
+
+        autoSoloButton.setButtonText("AUTO-SOLO");
+        autoSoloButton.setClickingTogglesState(true);
+        autoSoloButton.setToggleState(autoSoloEnabled, juce::dontSendNotification);
+        autoSoloButton.onClick = [this]
+        {
+            if (onAutoSoloChanged)
+                onAutoSoloChanged(autoSoloButton.getToggleState());
+        };
+        addAndMakeVisible(autoSoloButton);
+
+        addCrossoverButton.setButtonText("XOV-ADD");
+        addCrossoverButton.setClickingTogglesState(false);
+        addCrossoverButton.setTextJustification(juce::Justification::centredLeft);
+        addCrossoverButton.onClick = [this]
+        {
+            if (onActiveSplitCountChange)
+                onActiveSplitCountChange(1);
+        };
+        crossover.addAndMakeVisible(addCrossoverButton);
+
+        removeCrossoverButton.setButtonText("XOV-DEL");
+        removeCrossoverButton.setClickingTogglesState(false);
+        removeCrossoverButton.onClick = [this]
+        {
+            if (onActiveSplitCountChange)
+                onActiveSplitCountChange(-1);
+        };
+        crossover.addAndMakeVisible(removeCrossoverButton);
     }
 
     int getPreferredHeight() const
     {
-        return 8 + fullband.getPreferredHeight();
+        return 8
+            + fullband.getPreferredHeight()
+            + sectionRowGap
+            + crossover.getPreferredHeight()
+            + sectionRowGap
+            + 24;
     }
 
     void paint(juce::Graphics& graphics) override
@@ -1175,24 +1562,50 @@ public:
         juce::ignoreUnused(graphics);
     }
 
+    void refreshExternalState()
+    {
+        crossover.refreshExternalState();
+    }
+
     void resized() override
     {
         auto bounds = getLocalBounds().reduced(0, 4);
         fullband.setBounds(bounds.removeFromTop(fullband.getPreferredHeight()));
+        bounds.removeFromTop(sectionRowGap);
+        crossover.setBounds(bounds.removeFromTop(crossover.getPreferredHeight()));
+        auto xoverButtons = crossover.getExtraControlBounds(0, {});
+        addCrossoverButton.setVisible(! xoverButtons.isEmpty());
+        removeCrossoverButton.setVisible(! xoverButtons.isEmpty());
+
+        if (! xoverButtons.isEmpty())
+        {
+            addCrossoverButton.setBounds(xoverButtons.removeFromLeft(parameterNameWidth));
+            xoverButtons.removeFromLeft(parameterGap);
+            removeCrossoverButton.setBounds(xoverButtons);
+        }
+
+        bounds.removeFromTop(sectionRowGap);
+        autoSoloButton.setBounds(bounds.removeFromTop(24).reduced(sectionContentInsetX, 0));
     }
 
 private:
+    std::function<size_t()> activeSplitCountProvider;
     SectionComponent fullband;
+    SectionComponent crossover;
+    BoxTextButton autoSoloButton;
+    BoxTextButton addCrossoverButton;
+    BoxTextButton removeCrossoverButton;
+    std::function<void(int)> onActiveSplitCountChange;
+    std::function<void(bool)> onAutoSoloChanged;
 };
 } // namespace
 
-Mx6AudioProcessorEditor::Mx6AudioProcessorEditor(Mx6AudioProcessor& processorToEdit)
+MxeAudioProcessorEditor::MxeAudioProcessorEditor(MxeAudioProcessor& processorToEdit)
     : juce::AudioProcessorEditor(&processorToEdit)
 {
     auto& valueTreeState = processorToEdit.getValueTreeState();
-    auto* singleBandParameter = dynamic_cast<juce::RangedAudioParameter*>(valueTreeState.getParameter(makeSingleBandModeParameterId()));
-    jassert(singleBandParameter != nullptr);
-    singleBandModeParameter = singleBandParameter;
+    activeSplitCountParameter = dynamic_cast<juce::RangedAudioParameter*>(valueTreeState.getParameter(makeActiveSplitCountParameterId()));
+    jassert(activeSplitCountParameter != nullptr);
 
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
@@ -1217,23 +1630,22 @@ Mx6AudioProcessorEditor::Mx6AudioProcessorEditor(Mx6AudioProcessor& processorToE
             [this]
             {
                 updatePageChangedIndicators();
+            },
+            [this, bandIndex]
+            {
+                toggleManualSolo(bandIndex);
+            },
+            [this, bandIndex]
+            {
+                return manualSoloMask[bandIndex];
+            },
+            [this]
+            {
+                return ! autoSoloEnabled;
             });
         addAndMakeVisible(*page);
         bandPages[bandIndex] = std::move(page);
     }
-
-    singleBandPage = std::make_unique<BandPageComponent>(
-        valueTreeState,
-        [] (const char* suffix)
-        {
-            return makeSingleParameterId(suffix);
-        },
-        uiAccent,
-        [this]
-        {
-            updatePageChangedIndicators();
-        });
-    addAndMakeVisible(*singleBandPage);
 
     size_t activeSoloCount = 0;
 
@@ -1248,8 +1660,7 @@ Mx6AudioProcessorEditor::Mx6AudioProcessorEditor(Mx6AudioProcessor& processorToE
         }
     }
 
-    singleBandMode = singleBandModeParameter != nullptr && singleBandModeParameter->getValue() >= 0.5f;
-    allBandsActive = singleBandMode || activeSoloCount != 1;
+    allBandsActive = activeSoloCount != 1;
 
     auto allButton = std::make_unique<BoxTextButton>(uiAccent);
     allButton->setButtonText("A");
@@ -1263,17 +1674,23 @@ Mx6AudioProcessorEditor::Mx6AudioProcessorEditor(Mx6AudioProcessor& processorToE
         [] (const char* suffix)
         {
             return makeFullbandParameterId(suffix);
+        },
+        autoSoloEnabled,
+        [this]
+        {
+            return getActiveSplitCount();
+        },
+        [this] (const int delta)
+        {
+            changeActiveSplitCount(delta);
+        },
+        [this] (const bool shouldBeEnabled)
+        {
+            setAutoSoloEnabled(shouldBeEnabled);
         });
     addAndMakeVisible(*allBandsPage);
 
-    auto modeButton = std::make_unique<BoxTextButton>(uiAccent);
-    modeButton->setButtonText(singleBandMode ? "S" : "M");
-    modeButton->setClickingTogglesState(false);
-    modeButton->onClick = [this] { toggleProcessingMode(); };
-    addAndMakeVisible(*modeButton);
-    monitorButtons[numBands + 1] = std::move(modeButton);
-
-    footerLabel.setText("MX6 by MIXOLVE", juce::dontSendNotification);
+    footerLabel.setText("MXE by MIXOLVE", juce::dontSendNotification);
     footerLabel.setJustificationType(juce::Justification::centred);
     footerLabel.setColour(juce::Label::textColourId, uiWhite);
     footerLabel.setFont(makeUiFont());
@@ -1288,14 +1705,14 @@ Mx6AudioProcessorEditor::Mx6AudioProcessorEditor(Mx6AudioProcessor& processorToE
     setSize(fixedEditorWidth, fixedEditorHeight);
 }
 
-Mx6AudioProcessorEditor::~Mx6AudioProcessorEditor() = default;
+MxeAudioProcessorEditor::~MxeAudioProcessorEditor() = default;
 
-void Mx6AudioProcessorEditor::paint(juce::Graphics& graphics)
+void MxeAudioProcessorEditor::paint(juce::Graphics& graphics)
 {
     graphics.fillAll(uiGrey800);
 }
 
-void Mx6AudioProcessorEditor::resized()
+void MxeAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds();
     bounds.removeFromLeft(editorInsetX);
@@ -1309,11 +1726,13 @@ void Mx6AudioProcessorEditor::resized()
 
     for (auto& button : monitorButtons)
     {
-        if (button == nullptr)
-            continue;
-
         const auto buttonWidth = baseButtonWidth + (remainder > 0 ? 1 : 0);
-        button->setBounds(monitorRow.removeFromLeft(buttonWidth).translated(0, monitorRowOffsetY));
+
+        if (button != nullptr)
+            button->setBounds(monitorRow.removeFromLeft(buttonWidth).translated(0, monitorRowOffsetY));
+        else
+            monitorRow.removeFromLeft(buttonWidth);
+
         monitorRow.removeFromLeft(monitorButtonGap);
         remainder = juce::jmax(0, remainder - 1);
     }
@@ -1327,71 +1746,81 @@ void Mx6AudioProcessorEditor::resized()
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
         if (auto* page = bandPages[bandIndex].get())
-        {
-            if (auto* bandPage = dynamic_cast<BandPageComponent*>(page))
-                page->setBounds(bounds.withHeight(juce::jmin(bounds.getHeight(), bandPage->getPreferredHeight())));
-            else
-                page->setBounds(bounds);
-        }
+            page->setBounds(bounds);
     }
 
     if (auto* page = allBandsPage.get())
-    {
-        if (auto* fullbandPage = dynamic_cast<FullbandPageComponent*>(page))
-            page->setBounds(bounds.withHeight(juce::jmin(bounds.getHeight(), fullbandPage->getPreferredHeight())));
-        else
-            page->setBounds(bounds);
-    }
+        page->setBounds(bounds);
 
-    if (auto* page = singleBandPage.get())
-    {
-        if (auto* bandPage = dynamic_cast<BandPageComponent*>(page))
-            page->setBounds(bounds.withHeight(juce::jmin(bounds.getHeight(), bandPage->getPreferredHeight())));
-        else
-            page->setBounds(bounds);
-    }
 }
 
-void Mx6AudioProcessorEditor::selectBand(const size_t bandIndex)
+void MxeAudioProcessorEditor::selectBand(const size_t bandIndex)
 {
-    if (singleBandMode)
+    visibleBandIndex = juce::jmin(bandIndex, getActiveBandCount() - 1);
+    allBandsActive = false;
+
+    if (autoSoloEnabled)
+        manualSoloMask = {};
+
+    updateMonitorButtons();
+    updateBandPageVisibility();
+    syncMonitorParameters();
+    resized();
+}
+
+void MxeAudioProcessorEditor::toggleManualSolo(const size_t bandIndex)
+{
+    if (autoSoloEnabled || bandIndex >= getActiveBandCount())
         return;
 
     visibleBandIndex = juce::jmin(bandIndex, numBands - 1);
     allBandsActive = false;
+    manualSoloMask[visibleBandIndex] = ! manualSoloMask[visibleBandIndex];
     updateMonitorButtons();
     updateBandPageVisibility();
     syncMonitorParameters();
 }
 
-void Mx6AudioProcessorEditor::toggleProcessingMode()
+void MxeAudioProcessorEditor::changeActiveSplitCount(const int delta)
 {
-    if (singleBandMode)
-    {
-        singleBandMode = false;
-        allBandsActive = true;
-    }
-    else
-    {
-        singleBandMode = true;
-        allBandsActive = true;
-    }
+    if (activeSplitCountParameter == nullptr)
+        return;
+
+    const auto currentValue = static_cast<int>(std::round(activeSplitCountParameter->convertFrom0to1(activeSplitCountParameter->getValue())));
+    const auto newValue = juce::jlimit(0, static_cast<int>(numBands - 1), currentValue + delta);
+    activeSplitCountParameter->beginChangeGesture();
+    activeSplitCountParameter->setValueNotifyingHost(activeSplitCountParameter->convertTo0to1(static_cast<float>(newValue)));
+    activeSplitCountParameter->endChangeGesture();
+
+    visibleBandIndex = juce::jmin(visibleBandIndex, getActiveBandCount() - 1);
+    manualSoloMask = {};
+
+    if (auto* fullbandPage = dynamic_cast<FullbandPageComponent*>(allBandsPage.get()))
+        fullbandPage->refreshExternalState();
 
     updateMonitorButtons();
     updateBandPageVisibility();
     syncMonitorParameters();
+    resized();
 }
 
-void Mx6AudioProcessorEditor::setAllBandsMonitoring()
+void MxeAudioProcessorEditor::setAllBandsMonitoring()
 {
-    singleBandMode = false;
     allBandsActive = true;
     updateMonitorButtons();
     updateBandPageVisibility();
     syncMonitorParameters();
 }
 
-void Mx6AudioProcessorEditor::syncMonitorParameters()
+void MxeAudioProcessorEditor::setAutoSoloEnabled(const bool shouldBeEnabled)
+{
+    autoSoloEnabled = shouldBeEnabled;
+    manualSoloMask = {};
+    updateMonitorButtons();
+    syncMonitorParameters();
+}
+
+void MxeAudioProcessorEditor::syncMonitorParameters()
 {
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
@@ -1400,56 +1829,75 @@ void Mx6AudioProcessorEditor::syncMonitorParameters()
         if (parameter == nullptr)
             continue;
 
-        const auto enabled = ! singleBandMode && ! allBandsActive && bandIndex == visibleBandIndex;
+        const auto enabled = bandIndex < getActiveBandCount()
+            && ((autoSoloEnabled && ! allBandsActive && bandIndex == visibleBandIndex)
+                || (! autoSoloEnabled && manualSoloMask[bandIndex]));
         const auto newValue = parameter->convertTo0to1(enabled ? 1.0f : 0.0f);
 
         parameter->beginChangeGesture();
         parameter->setValueNotifyingHost(newValue);
         parameter->endChangeGesture();
     }
-
-    if (singleBandModeParameter != nullptr)
-    {
-        const auto newValue = singleBandModeParameter->convertTo0to1(singleBandMode ? 1.0f : 0.0f);
-        singleBandModeParameter->beginChangeGesture();
-        singleBandModeParameter->setValueNotifyingHost(newValue);
-        singleBandModeParameter->endChangeGesture();
-    }
 }
 
-void Mx6AudioProcessorEditor::updateMonitorButtons()
+void MxeAudioProcessorEditor::updateMonitorButtons()
 {
+    const auto activeBandCount = getActiveBandCount();
+
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
         if (auto* button = monitorButtons[bandIndex].get())
-            button->setToggleState(! singleBandMode && ! allBandsActive && bandIndex == visibleBandIndex, juce::dontSendNotification);
+        {
+            const auto isActiveBand = bandIndex < activeBandCount;
+            button->setVisible(true);
+            button->setEnabled(isActiveBand);
+            button->setAlpha(isActiveBand ? 1.0f : 0.45f);
+            button->setToggleState(! allBandsActive && bandIndex == visibleBandIndex, juce::dontSendNotification);
+        }
     }
 
     if (auto* button = monitorButtons[numBands].get())
-        button->setToggleState(! singleBandMode && allBandsActive, juce::dontSendNotification);
-
-    if (auto* button = monitorButtons[numBands + 1].get())
     {
-        button->setButtonText(singleBandMode ? "S" : "M");
-        button->setToggleState(singleBandMode, juce::dontSendNotification);
+        button->setVisible(true);
+        button->setToggleState(allBandsActive, juce::dontSendNotification);
+    }
+
+    for (auto& page : bandPages)
+    {
+        if (auto* bandPage = dynamic_cast<BandPageComponent*>(page.get()))
+            bandPage->refreshExternalState();
     }
 }
 
-void Mx6AudioProcessorEditor::updateBandPageVisibility()
+void MxeAudioProcessorEditor::updateBandPageVisibility()
 {
+    const auto activeBandCount = getActiveBandCount();
+
     for (size_t bandIndex = 0; bandIndex < numBands; ++bandIndex)
     {
         if (auto* page = bandPages[bandIndex].get())
-            page->setVisible(! singleBandMode && ! allBandsActive && bandIndex == visibleBandIndex);
+            page->setVisible(! allBandsActive && bandIndex < activeBandCount && bandIndex == visibleBandIndex);
     }
 
     if (auto* page = allBandsPage.get())
-        page->setVisible(! singleBandMode && allBandsActive);
-
-    if (auto* page = singleBandPage.get())
-        page->setVisible(singleBandMode);
+        page->setVisible(allBandsActive);
 }
 
-void Mx6AudioProcessorEditor::updatePageChangedIndicators()
+size_t MxeAudioProcessorEditor::getActiveSplitCount() const
+{
+    if (activeSplitCountParameter == nullptr)
+        return numBands - 1;
+
+    return static_cast<size_t>(juce::jlimit(0,
+                                           static_cast<int>(numBands - 1),
+                                           static_cast<int>(std::round(activeSplitCountParameter->convertFrom0to1(activeSplitCountParameter->getValue())))));
+}
+
+size_t MxeAudioProcessorEditor::getActiveBandCount() const
+{
+    return getActiveSplitCount() + 1;
+}
+
+void MxeAudioProcessorEditor::updatePageChangedIndicators()
 {
 }

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace mx6::dsp
+namespace mxe::dsp
 {
 namespace
 {
@@ -638,4 +638,4 @@ void DspCore::advanceSmoothedParameters() noexcept
     autoInLeftGain.advance();
     wideAmount.advance();
 }
-} // namespace mx6::dsp
+} // namespace mxe::dsp

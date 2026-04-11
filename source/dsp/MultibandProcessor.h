@@ -6,14 +6,16 @@
 #include <array>
 #include <vector>
 
-namespace mx6::dsp
+namespace mxe::dsp
 {
 class MultibandProcessor
 {
 public:
     static constexpr size_t numBands = MultibandCrossover::numBands;
+    static constexpr size_t numSplits = MultibandCrossover::numSplits;
     using Parameters = DspCore::Parameters;
     using BandParameters = std::array<Parameters, numBands>;
+    using CrossoverFrequencies = MultibandCrossover::SplitFrequencies;
     using SoloMask = std::array<bool, numBands>;
     struct FullbandParameters
     {
@@ -27,6 +29,8 @@ public:
     void prepare(double sampleRate, int maxBlockSize, int numChannels);
     void reset();
     void setBandParameters(const BandParameters& newParameters);
+    void setActiveSplitCount(size_t newActiveSplitCount);
+    void setCrossoverFrequencies(const CrossoverFrequencies& newFrequencies);
     void setFullbandParameters(const FullbandParameters& newParameters);
     void setSoloMask(const SoloMask& newSoloMask);
     void process(juce::AudioBuffer<float>& buffer);
@@ -55,6 +59,8 @@ private:
     void updateLatencyCompensation();
 
     BandParameters parameters {};
+    CrossoverFrequencies crossoverFrequencies { 134.0, 523.0, 2093.0, 5000.0, 10000.0 };
+    size_t activeSplitCount = numSplits;
     FullbandParameters fullbandParameters {};
     MultibandCrossover crossover;
     std::array<DspCore, numBands> bandProcessors;
@@ -71,4 +77,4 @@ private:
     int alignmentWritePosition = 0;
     int targetLatencySamples = 0;
 };
-} // namespace mx6::dsp
+} // namespace mxe::dsp

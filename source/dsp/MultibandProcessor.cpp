@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace mx6::dsp
+namespace mxe::dsp
 {
 namespace
 {
@@ -89,6 +89,8 @@ void MultibandProcessor::prepare(const double sampleRate, const int maxBlockSize
     for (auto& bandProcessor : bandProcessors)
         bandProcessor.prepare(sampleRate, maxBlockSize, numChannels);
 
+    crossover.setActiveSplitCount(activeSplitCount);
+    crossover.setSplitFrequencies(crossoverFrequencies);
     setBandParameters(parameters);
     setFullbandParameters(fullbandParameters);
     reset();
@@ -116,6 +118,29 @@ void MultibandProcessor::setBandParameters(const BandParameters& newParameters)
     }
 
     updateLatencyCompensation();
+}
+
+void MultibandProcessor::setActiveSplitCount(const size_t newActiveSplitCount)
+{
+    const auto constrainedSplitCount = std::min(newActiveSplitCount, numSplits);
+
+    if (activeSplitCount == constrainedSplitCount)
+        return;
+
+    activeSplitCount = constrainedSplitCount;
+    crossover.setActiveSplitCount(activeSplitCount);
+    updateLatencyCompensation();
+    clearAlignmentBuffers();
+}
+
+void MultibandProcessor::setCrossoverFrequencies(const CrossoverFrequencies& newFrequencies)
+{
+    if (crossoverFrequencies == newFrequencies)
+        return;
+
+    crossoverFrequencies = newFrequencies;
+    crossover.setSplitFrequencies(crossoverFrequencies);
+    clearAlignmentBuffers();
 }
 
 void MultibandProcessor::setFullbandParameters(const FullbandParameters& newParameters)
@@ -164,7 +189,9 @@ void MultibandProcessor::process(juce::AudioBuffer<float>& buffer)
         auto sumLeft = 0.0;
         auto sumRight = 0.0;
 
-        for (size_t bandIndex = 0; bandIndex < bandProcessors.size(); ++bandIndex)
+        const auto activeBandCount = activeSplitCount + 1;
+
+        for (size_t bandIndex = 0; bandIndex < activeBandCount; ++bandIndex)
         {
             const auto bandOutput = bandProcessors[bandIndex].processSample(bands[bandIndex].left, bands[bandIndex].right);
             alignmentLeft[bandIndex][static_cast<size_t>(alignmentWritePosition)] = bandOutput.left;
@@ -220,7 +247,8 @@ void MultibandProcessor::snapFullbandParameters() noexcept
 
 void MultibandProcessor::updateLatencyCompensation()
 {
-    targetLatencySamples = *std::max_element(bandLatencies.begin(), bandLatencies.end());
+    const auto activeBandCount = activeSplitCount + 1;
+    targetLatencySamples = *std::max_element(bandLatencies.begin(), bandLatencies.begin() + static_cast<std::ptrdiff_t>(activeBandCount));
     jassert(targetLatencySamples < alignmentBufferSize);
 }
-} // namespace mx6::dsp
+} // namespace mxe::dsp

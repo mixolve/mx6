@@ -2,7 +2,7 @@
 
 #include <array>
 
-namespace mx6::dsp
+namespace mxe::dsp
 {
 class MultibandCrossover
 {
@@ -17,10 +17,12 @@ public:
     };
 
     using BandArray = std::array<StereoSample, numBands>;
+    using SplitFrequencies = std::array<double, numSplits>;
 
     void prepare(double sampleRate);
     void reset();
-    void setSplitFrequencies(const std::array<double, numSplits>& newFrequencies);
+    void setActiveSplitCount(size_t newActiveSplitCount);
+    void setSplitFrequencies(const SplitFrequencies& newFrequencies);
     BandArray processSample(double leftInput, double rightInput);
 
 private:
@@ -49,11 +51,13 @@ private:
     static BiquadCoefficients makeHighpass(double sampleRate, double frequency, double q);
     static size_t compIndex(size_t splitIndex, size_t bandIndex);
     static double processCascade(double input, const Cascade& coefficients, CascadeState& state);
+    static SplitFrequencies constrainSplitFrequencies(const SplitFrequencies& sourceFrequencies, double sampleRate);
 
     void updateSplit(size_t splitIndex, double frequency);
 
     double currentSampleRate = 44100.0;
-    std::array<double, numSplits> frequencies { 134.0, 523.0, 2093.0, 5000.0, 10000.0 };
+    SplitFrequencies frequencies { 134.0, 523.0, 2093.0, 5000.0, 10000.0 };
+    size_t activeSplitCount = numSplits;
     std::array<Cascade, numSplits> lowpassCoefficients {};
     std::array<Cascade, numSplits> highpassCoefficients {};
 
@@ -67,4 +71,4 @@ private:
     std::array<CascadeState, numCompensators> compHpLeft {};
     std::array<CascadeState, numCompensators> compHpRight {};
 };
-} // namespace mx6::dsp
+} // namespace mxe::dsp
