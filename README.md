@@ -1,1 +1,0 @@
-[latest version (currently macOS only)](https://github.com/mixolve/mxe/releases/latest/download/mxe-macos.zip)
