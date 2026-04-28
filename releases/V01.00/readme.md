@@ -1,1 +1,1 @@
-mxe-V01.01-macos.zip contains .vst3
+mxe-V01.00-macos.zip contains .vst3
